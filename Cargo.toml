@@ -1,3 +1,7 @@
-[workspace]
-members = ["consensus"]
-resolver = "2"
+[package]
+name = "simple-bft"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sha2 = "^0.10"
