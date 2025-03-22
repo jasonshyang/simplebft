@@ -1,6 +1,6 @@
 use sha2::{Digest as ShaDigest, Sha512};
 
-use super::{message::{Block, Hashable, MessageType}, peers::Peers};
+use super::{message::{Block, Hashable}, peers::Peers, processor::Stage};
 use crate::common::crypto::{Digest, Signature};
 
 /*
@@ -14,7 +14,7 @@ use crate::common::crypto::{Digest, Signature};
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ConsensusPayload {
     pub view_num: u64,
-    pub message_type: MessageType,
+    pub stage: Stage,
     pub block: Block,
 }
 
@@ -25,10 +25,10 @@ pub struct QuorumCertificate {
 }
 
 impl QuorumCertificate {
-    pub fn new(view_num: u64, message_type: MessageType, block: Block) -> Self {
+    pub fn new(view_num: u64, stage: Stage, block: Block) -> Self {
         let payload = ConsensusPayload {
             view_num,
-            message_type,
+            stage,
             block,
         };
         QuorumCertificate {
@@ -41,7 +41,7 @@ impl QuorumCertificate {
         QuorumCertificate {
             payload: ConsensusPayload {
                 view_num: 0,
-                message_type: MessageType::NewView,
+                stage: Stage::NewView,
                 block: Block::genesis(),
             },
             signatures: Vec::new(),
@@ -52,8 +52,22 @@ impl QuorumCertificate {
         self.signatures.push(sig);
     }
 
+    pub fn is_genesis(&self) -> bool {
+        self.payload.view_num == 0
+    }
+
+    pub fn is_complete(&self, n: usize, f: usize) -> bool {
+        self.signatures.len() >= (n - f)
+    }
+
     pub fn validate(&self, peers: &Peers, n: usize, f: usize) -> bool {
-        if self.signatures.len() < (n - f) {
+        if self.is_genesis() {
+            println!("QC validation bypassed: Genesis QC");
+            return true;
+        }
+
+        if self.is_complete(n, f) == false {
+            println!("QC failed: QC is not complete");
             return false;
         }
 
@@ -61,6 +75,7 @@ impl QuorumCertificate {
         let mut valid_signatures = 0;
         for sig in &self.signatures {
             if sig.verify(&self.payload.hash()) == false  {
+                println!("QC failed: Signature verification failed");
                 return false;
             }
 
@@ -70,6 +85,7 @@ impl QuorumCertificate {
         }
 
         if valid_signatures < (n - f) {
+            println!("QC failed: Not enough valid signatures");
             return false;
         }
         
@@ -81,7 +97,7 @@ impl Hashable for ConsensusPayload {
     fn hash(&self) -> Digest {
         let mut hasher = Sha512::new();
         hasher.update(self.view_num.to_be_bytes());
-        hasher.update(self.message_type.as_ref());
+        hasher.update(self.stage.as_ref());
         hasher.update(&self.block.hash());
         let result = hasher.finalize();
         let mut digest = [0u8; 64];

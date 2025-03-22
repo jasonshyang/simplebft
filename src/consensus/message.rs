@@ -1,7 +1,7 @@
 use sha2::{Digest as ShaDigest, Sha512};
 
-use super::qc::QuorumCertificate;
-use crate::common::crypto::{Digest, Pubkey, Signature};
+use super::{processor::Stage, qc::QuorumCertificate};
+use crate::common::crypto::{Digest, Signature};
 
 /*
     A message m ...
@@ -24,21 +24,26 @@ pub trait Hashable {
     fn hash(&self) -> Digest;
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum MessageType {
-    NewView,
-    Prepare,
-    PreCommit,
-    Commit,
-    Decide,
+#[derive(Debug)]
+pub enum Message {
+    Proposal(Proposal),
+    Vote(Vote),
 }
 
-pub struct Message {
-    pub author: Pubkey,
+#[derive(Clone, Debug)]
+pub struct Proposal {
     pub view_num: u64,
-    pub message_type: MessageType,
+    pub stage: Stage,
     pub block: Block,
     pub qc: QuorumCertificate,
+    pub sig: Signature,
+}
+
+#[derive(Clone, Debug)]
+pub struct Vote {
+    pub view_num: u64,
+    pub stage: Stage,
+    pub block_hash: Digest,
     pub sig: Signature,
 }
 
@@ -47,18 +52,6 @@ pub struct Block {
     pub view_num: u64,
     pub parent: Digest,
     pub data: BlockData,
-}
-
-impl AsRef<[u8]> for MessageType {
-    fn as_ref(&self) -> &[u8] {
-        match self {
-            MessageType::NewView => &[0u8],
-            MessageType::Prepare => &[1u8],
-            MessageType::PreCommit => &[2u8],
-            MessageType::Commit => &[3u8],
-            MessageType::Decide => &[4u8],
-        }
-    }
 }
 
 impl Block {
