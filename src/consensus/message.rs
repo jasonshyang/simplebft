@@ -26,6 +26,7 @@ pub trait Hashable {
 
 #[derive(Debug)]
 pub enum Message {
+    NewView(NewView),
     Proposal(Proposal),
     Vote(Vote),
 }
@@ -44,6 +45,13 @@ pub struct Vote {
     pub view_num: u64,
     pub stage: Stage,
     pub block_hash: Digest,
+    pub sig: Signature,
+}
+
+#[derive(Clone, Debug)]
+pub struct NewView {
+    pub view_num: u64,
+    pub qc: QuorumCertificate,
     pub sig: Signature,
 }
 

@@ -9,6 +9,8 @@ use crate::common::crypto::{Digest, Signature};
     of signatures for the same tuple signed by (n − f ) replicas. Given
     a QC qc, we use qc.type, qc.viewNumber , qc.node to refer to the
     matching fields of the original tuple.
+
+    TODO: Currently the QC validation is not yet completed and should expect to be buggy
 */
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -41,7 +43,7 @@ impl QuorumCertificate {
         QuorumCertificate {
             payload: ConsensusPayload {
                 view_num: 0,
-                stage: Stage::NewView,
+                stage: Stage::Prepare,
                 block: Block::genesis(),
             },
             signatures: Vec::new(),
