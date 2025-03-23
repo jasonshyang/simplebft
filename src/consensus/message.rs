@@ -24,7 +24,7 @@ pub trait Hashable {
     fn hash(&self) -> Digest;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Message {
     NewView(NewView),
     Proposal(Proposal),
@@ -44,7 +44,7 @@ pub struct Proposal {
 pub struct Vote {
     pub view_num: u64,
     pub stage: Stage,
-    pub block_hash: Digest,
+    pub hash: Digest,
     pub sig: Signature,
 }
 

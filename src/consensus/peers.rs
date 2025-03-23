@@ -1,5 +1,6 @@
 use crate::common::crypto::Pubkey;
 
+#[derive(Debug, Clone)]
 pub struct Peers {
     pub members: Vec<Pubkey>,
 }

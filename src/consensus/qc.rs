@@ -50,6 +50,11 @@ impl QuorumCertificate {
         }
     }
 
+    pub fn reset(&mut self, payload: ConsensusPayload) {
+        self.payload = payload;
+        self.signatures.clear();
+    }
+
     pub fn add_signature(&mut self, sig: Signature) {
         self.signatures.push(sig);
     }
@@ -78,6 +83,7 @@ impl QuorumCertificate {
         for sig in &self.signatures {
             if sig.verify(&self.payload.hash()) == false  {
                 println!("QC failed: Signature verification failed");
+                println!("QC: {:?}", self);
                 return false;
             }
 
@@ -105,5 +111,36 @@ impl Hashable for ConsensusPayload {
         let mut digest = [0u8; 64];
         digest.copy_from_slice(&result[..]);
         digest
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::crypto::{Keypair, Pubkey, Secretkey};
+
+    #[test]
+    fn test_validate_qc() {
+        let keypair = Keypair {
+            pubkey: Pubkey { key: [1u8; 32] },
+            secret: Secretkey { key: [2u8; 64] },
+        };
+        let peers = Peers::new(vec![keypair.pubkey.clone()]);
+        let n = 1;
+        let f = 0;
+
+        let block = Block::new(1, [0u8; 64], [0u8; 1024]);
+        let payload = ConsensusPayload {
+            view_num: 1,
+            stage: Stage::Prepare,
+            block,
+        };
+        let sig = keypair.sign(&payload.hash());
+        let qc = QuorumCertificate {
+            payload,
+            signatures: vec![sig],
+        };
+
+        assert_eq!(qc.validate(&peers, n, f), true);
     }
 }
