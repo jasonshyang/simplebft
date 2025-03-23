@@ -653,19 +653,19 @@ mod tests {
             msg_tx: replica3_outgoing_tx,
         };
 
-        let proposer_handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             proposer_processor.run().await;
         });
 
-        let replica1_handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             replica1_processor.run().await;
         });
 
-        let replica2_handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             replica2_processor.run().await;
         });
 
-        let replica3_handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             replica3_processor.run().await;
         });
 
