@@ -27,7 +27,7 @@ pub enum ConsensusRole {
 pub struct ConsensusState {
     pub current_view: u64,
     pub high_qc: QuorumCertificate,
-    pub next_qc: QuorumCertificate,
+    pub next_qc: Option<QuorumCertificate>,
     pub vote_count: u64,
     pub peers: Peers,
 }
@@ -116,7 +116,7 @@ impl ConsensusProcessor {
             self.reset_vote_count();
 
             // Update next QC
-            self.reset_qc(new_view.qc.payload.clone());
+            self.reset_next_qc(new_view.qc.payload.clone());
         }
 
 
@@ -197,7 +197,12 @@ impl ConsensusProcessor {
         }
 
         // Add vote to QC
-        self.state.next_qc.add_signature(vote.sig);
+        if let Some(next_qc) = &mut self.state.next_qc{
+            next_qc.add_signature(vote.sig)
+        } else {
+            panic!("next_qc is None");
+        };
+        
         self.increment_vote_count();
         println!("Added vote to QC");
 
@@ -205,7 +210,7 @@ impl ConsensusProcessor {
         if self.is_vote_count_quorum() {
             println!("Vote count quorum reached");
             // Update high QC
-            self.state.high_qc = self.state.next_qc.clone();
+            self.state.high_qc = self.state.next_qc.clone().unwrap();
 
             // Broadcast QC
             self.msg_tx.send(Message::Proposal(Proposal {
@@ -225,7 +230,7 @@ impl ConsensusProcessor {
             self.reset_vote_count();
 
             // Update next QC
-            self.reset_qc(self.state.high_qc.payload.clone());
+            self.reset_next_qc(self.state.high_qc.payload.clone());
         }
     }
 
@@ -241,8 +246,12 @@ impl ConsensusProcessor {
         self.state.vote_count >= (self.state.peers.members.len() - self.state.peers.members.len() / 3).try_into().unwrap()
     }
 
-    fn reset_qc(&mut self, payload: ConsensusPayload) {
-        self.state.next_qc.reset(payload);
+    fn reset_next_qc(&mut self, payload: ConsensusPayload) {
+        if let Some(next_qc) = &mut self.state.next_qc {
+            next_qc.reset(payload)
+        } else {
+            panic!("next_qc is None");
+        };
     }
 
 }
@@ -277,22 +286,31 @@ mod tests {
         let peers = Peers::new(vec![replica1.pubkey(), proposer.pubkey(), replica2.pubkey(), replica3.pubkey()]);
 
         // Arrange: Create a genesis block and a genesis QC
-        let last_block = Block::genesis();
-        let last_qc = QuorumCertificate::genesis();
-
-        let new_block = Block {
+        let last_block = Block {
             view_num: 1,
-            parent: last_block.hash(),
+            parent: Block::genesis().hash(),
             data: [1u8; 1024],
         };
 
-        let next_qc = QuorumCertificate {
-            payload: ConsensusPayload {
-                view_num: 1,
-                stage: Stage::Decide,
-                block: new_block.clone(),
-            },
-            signatures: Vec::new(),
+        let last_qc_payload = ConsensusPayload {
+            view_num: 1,
+            stage: Stage::Decide,
+            block: last_block.clone(),
+        };
+
+        let last_qc = QuorumCertificate{
+            payload: last_qc_payload.clone(),
+            signatures: vec![
+                replica1.sign(&last_qc_payload.hash()),
+                replica2.sign(&last_qc_payload.hash()),
+                replica3.sign(&last_qc_payload.hash()),
+            ],
+        };
+
+        let new_block = Block {
+            view_num: 2,
+            parent: last_block.hash(),
+            data: [2u8; 1024],
         };
 
         // Arrange: Create new view message for each replica
@@ -319,14 +337,22 @@ mod tests {
         let message3 = Message::NewView(new_view3);
 
         // Arrange: Instantiate processers for proposer and replicas
+        let next_qc = QuorumCertificate {
+            payload: ConsensusPayload {
+                view_num: 1,
+                stage: Stage::Prepare,
+                block: new_block.clone(),
+            },
+            signatures: Vec::new(),
+        };
         let mut proposer_processor = ConsensusProcessor {
             keypair: proposer,
             stage: Stage::Prepare,
             role: ConsensusRole::Leader,
             state: ConsensusState {
                 current_view: 1,
-                high_qc: QuorumCertificate::genesis(),
-                next_qc,
+                high_qc: last_qc.clone(),
+                next_qc: Some(next_qc),
                 vote_count: 0,
                 peers: peers.clone(),
             },
@@ -340,8 +366,8 @@ mod tests {
             role: ConsensusRole::Replica,
             state: ConsensusState {
                 current_view: 1,
-                high_qc: QuorumCertificate::genesis(),
-                next_qc: QuorumCertificate::genesis(),
+                high_qc: last_qc.clone(),
+                next_qc: None,
                 vote_count: 0,
                 peers: peers.clone(),
             },
@@ -355,8 +381,8 @@ mod tests {
             role: ConsensusRole::Replica,
             state: ConsensusState {
                 current_view: 1,
-                high_qc: QuorumCertificate::genesis(),
-                next_qc: QuorumCertificate::genesis(),
+                high_qc: last_qc.clone(),
+                next_qc: None,
                 vote_count: 0,
                 peers: peers.clone(),
             },
@@ -370,8 +396,8 @@ mod tests {
             role: ConsensusRole::Replica,
             state: ConsensusState {
                 current_view: 1,
-                high_qc: QuorumCertificate::genesis(),
-                next_qc: QuorumCertificate::genesis(),
+                high_qc: last_qc.clone(),
+                next_qc: None,
                 vote_count: 0,
                 peers: peers.clone(),
             },
