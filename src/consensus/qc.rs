@@ -1,6 +1,6 @@
 use sha2::{Digest as ShaDigest, Sha512};
 
-use super::{message::{Block, Hashable}, peers::Peers, processor::Stage};
+use super::{message::{Block, Hashable}, peers::Peers, message::Stage};
 use crate::common::crypto::{Digest, Signature};
 
 /*
@@ -117,17 +117,16 @@ impl Hashable for ConsensusPayload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::crypto::{Keypair, Pubkey, Secretkey};
+    use crate::common::crypto::Keypair;
 
     #[test]
     fn test_validate_qc() {
-        let keypair = Keypair {
-            pubkey: Pubkey { key: [1u8; 32] },
-            secret: Secretkey { key: [2u8; 64] },
-        };
-        let peers = Peers::new(vec![keypair.pubkey.clone()]);
-        let n = 1;
-        let f = 0;
+        let keypair1 = Keypair::new_pair();
+        let keypair2 = Keypair::new_pair();
+        let keypair3 = Keypair::new_pair();
+        let peers = Peers::new(vec![keypair1.pubkey(), keypair2.pubkey(), keypair3.pubkey()]);
+        let n = 3;
+        let f = 1;
 
         let block = Block::new(1, [0u8; 64], [0u8; 1024]);
         let payload = ConsensusPayload {
@@ -135,10 +134,12 @@ mod tests {
             stage: Stage::Prepare,
             block,
         };
-        let sig = keypair.sign(&payload.hash());
+        let sig1 = keypair1.sign(&payload.hash());
+        let sig2 = keypair2.sign(&payload.hash());
+        let sig3 = keypair3.sign(&payload.hash());
         let qc = QuorumCertificate {
             payload,
-            signatures: vec![sig],
+            signatures: vec![sig1, sig2, sig3],
         };
 
         assert_eq!(qc.validate(&peers, n, f), true);

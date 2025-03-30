@@ -1,6 +1,6 @@
 use sha2::{Digest as ShaDigest, Sha512};
 
-use super::{processor::Stage, qc::QuorumCertificate};
+use super::qc::QuorumCertificate;
 use crate::common::crypto::{Digest, Signature};
 
 /*
@@ -22,6 +22,14 @@ pub type BlockData = [u8; MAX_BLOCK_SIZE];
 
 pub trait Hashable {
     fn hash(&self) -> Digest;
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Stage {
+    Prepare,
+    PreCommit,
+    Commit,
+    Decide,
 }
 
 #[derive(Debug, Clone)]
@@ -60,6 +68,28 @@ pub struct Block {
     pub view_num: u64,
     pub parent: Digest,
     pub data: BlockData,
+}
+
+impl AsRef<[u8]> for Stage {
+    fn as_ref(&self) -> &[u8] {
+        match self {
+            Stage::Prepare => &[1u8],
+            Stage::PreCommit => &[2u8],
+            Stage::Commit => &[3u8],
+            Stage::Decide => &[4u8],
+        }
+    }
+}
+
+impl Stage {
+    pub fn next(&self) -> Self {
+        match self {
+            Stage::Prepare => Stage::PreCommit,
+            Stage::PreCommit => Stage::Commit,
+            Stage::Commit => Stage::Decide,
+            Stage::Decide => Stage::Prepare,
+        }
+    }
 }
 
 impl Block {

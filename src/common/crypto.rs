@@ -1,17 +1,16 @@
+use ed25519_dalek::{ed25519::{self, signature::Signer}, SigningKey, VerifyingKey};
+use rand::rngs::OsRng;
+
 pub type Digest = [u8; 64];
 
 pub struct Keypair {
-    pub pubkey: Pubkey,
-    pub secret: Secretkey,
+    pubkey: Pubkey,
+    dalek_signer: SigningKey,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Pubkey {
     pub key: [u8; 32],
-}
-
-pub struct Secretkey {
-    pub key: [u8; 64],
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -21,16 +20,31 @@ pub struct Signature {
 }
 
 impl Keypair {
-    pub fn sign(&self, digest: &Digest) -> Signature {
-        // Placeholder for now, to be replaced with real signing
-        let mut sig = [0u8; 64];
-        for i in 0..64 {
-            sig[i] = digest[i] ^ self.pubkey.key[i % 32];
+    pub fn new_pair() -> Self {
+        let mut csprng = OsRng;
+        let dalek_signer = SigningKey::generate(&mut csprng);
+        let pubkey = Pubkey::from(&dalek_signer.verifying_key().to_bytes());
+
+        Keypair {
+            pubkey,
+            dalek_signer,
         }
+    }
+
+    pub fn sign(&self, digest: &Digest) -> Signature {
+        let sig = self
+            .dalek_signer
+            .sign(digest)
+            .to_bytes();
+
         Signature {
             signer: self.pubkey.clone(),
             sig,
         }
+    }
+
+    pub fn pubkey(&self) -> Pubkey {
+        self.pubkey.clone()
     }
 }
 
@@ -40,14 +54,21 @@ impl AsRef<[u8]> for Pubkey {
     }
 }
 
+impl From<&[u8; 32]> for Pubkey {
+    fn from(bytes: &[u8; 32]) -> Self {
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&bytes[..32]);
+        Pubkey { key }
+    }
+}
+
 impl Signature {
     pub fn verify(&self, digest: &Digest) -> bool {
-        // Placeholder for now, to be replaced with real verification
-        let mut computed_digest = [0u8; 64];
-        for i in 0..64 {
-            computed_digest[i] = self.sig[i] ^ self.signer.key[i % 32];
-        }
-        computed_digest == *digest
+        let dalek_sig = ed25519::Signature::from_bytes(&self.sig);
+        let dalek_pubkey = VerifyingKey::from_bytes(&self.signer.key).unwrap();
+        dalek_pubkey
+            .verify_strict(digest, &dalek_sig)
+            .is_ok()
     }
 }
 
@@ -57,13 +78,11 @@ mod tests {
 
     #[test]
     fn test_sign_and_verify() {
-        let pubkey = Pubkey { key: [1u8; 32] };
-        let secret = Secretkey { key: [2u8; 64] };
-        let keypair = Keypair { pubkey, secret };
-
-        let digest: Digest = [3u8; 64];
+        let keypair = Keypair::new_pair();
+        let digest: Digest = [4; 64];
         let signature = keypair.sign(&digest);
 
+        assert_eq!(signature.signer, keypair.pubkey);
         assert!(signature.verify(&digest));
     }
 }

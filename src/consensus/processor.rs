@@ -1,7 +1,7 @@
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::common::crypto::Keypair;
-use super::{message::{Hashable, Message, NewView, Proposal, Vote}, peers::Peers, qc::{ConsensusPayload, QuorumCertificate}};
+use super::{message::{Hashable, Message, NewView, Proposal, Stage, Vote}, peers::Peers, qc::{ConsensusPayload, QuorumCertificate}};
 
 /*
     TODO: Add node parent check
@@ -16,14 +16,6 @@ pub struct ConsensusProcessor {
     pub state: ConsensusState,
     pub msg_rx: Receiver<Message>,
     pub msg_tx: Sender<Message>,
-}
-
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum Stage {
-    Prepare,
-    PreCommit,
-    Commit,
-    Decide,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -255,293 +247,37 @@ impl ConsensusProcessor {
 
 }
 
-impl AsRef<[u8]> for Stage {
-    fn as_ref(&self) -> &[u8] {
-        match self {
-            Stage::Prepare => &[1u8],
-            Stage::PreCommit => &[2u8],
-            Stage::Commit => &[3u8],
-            Stage::Decide => &[4u8],
-        }
-    }
-}
-
-impl Stage {
-    pub fn next(&self) -> Self {
-        match self {
-            Stage::Prepare => Stage::PreCommit,
-            Stage::PreCommit => Stage::Commit,
-            Stage::Commit => Stage::Decide,
-            Stage::Decide => Stage::Prepare,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{common::crypto::{Pubkey, Secretkey}, consensus::{message::Block, qc::ConsensusPayload}};
-
-    #[tokio::test]
-    async fn test_handle_new_view() {
-        println!("Running test_handle_new_view");
-        let proposer_key = Pubkey { key: [1u8; 32] };
-        let proposer_secret = Secretkey { key: [2u8; 64] };
-        let proposer_keypair = Keypair { pubkey: proposer_key.clone(), secret: proposer_secret };
-
-        let replica1_key = Pubkey { key: [2u8; 32] };
-        let replica1_secret = Secretkey { key: [2u8; 64] };
-        let replica1_keypair = Keypair { pubkey: replica1_key.clone(), secret: replica1_secret };
-
-        let replica2_key = Pubkey { key: [3u8; 32] };
-        let replica2_secret = Secretkey { key: [2u8; 64] };
-        let replica2_keypair = Keypair { pubkey: replica2_key.clone(), secret: replica2_secret };
-
-        let replica3_key = Pubkey { key: [4u8; 32] };
-        let replica3_secret = Secretkey { key: [2u8; 64] };
-        let replica3_keypair = Keypair { pubkey: replica3_key.clone(), secret: replica3_secret };
-
-        let peers = Peers::new(vec![proposer_key, replica1_key, replica2_key, replica3_key]);
-
-        let last_block = Block {
-            view_num: 0,
-            parent: [0u8; 64],
-            data: [1u8; 1024],
-        };
-
-        let last_qc = QuorumCertificate {
-            payload: ConsensusPayload {
-                view_num: 0,
-                stage: Stage::Commit,
-                block: last_block.clone(),
-            },
-            signatures: vec![
-                proposer_keypair.sign(&last_block.hash()),
-                replica1_keypair.sign(&last_block.hash()),
-                replica2_keypair.sign(&last_block.hash()),
-                replica3_keypair.sign(&last_block.hash()),
-            ],
-        };
-
-        let new_view1 = NewView {
-            view_num: 0,
-            qc: last_qc.clone(),
-            sig: replica1_keypair.sign(&last_block.hash()),
-        };
-
-        let new_view2 = NewView {
-            view_num: 0,
-            qc: last_qc.clone(),
-            sig: replica2_keypair.sign(&last_block.hash()),
-        };
-
-        let new_view3 = NewView {
-            view_num: 0,
-            qc: last_qc.clone(),
-            sig: replica3_keypair.sign(&last_block.hash()),
-        };
-
-        let message1 = Message::NewView(new_view1);
-        let message2 = Message::NewView(new_view2);
-        let message3 = Message::NewView(new_view3);
-
-        let (incoming_tx, incoming_rx) = tokio::sync::mpsc::channel(100);
-        let (outgoing_tx, mut outgoing_rx) = tokio::sync::mpsc::channel(100);
-
-        let mut processor = ConsensusProcessor {
-            keypair: proposer_keypair,
-            stage: Stage::Prepare,
-            role: ConsensusRole::Leader,
-            state: ConsensusState {
-                current_view: 1,
-                high_qc: QuorumCertificate::genesis(),
-                next_qc: QuorumCertificate::genesis(),
-                vote_count: 0,
-                peers,
-            },
-            msg_rx: incoming_rx,
-            msg_tx: outgoing_tx,
-        };
-
-        incoming_tx.send(message1).await.unwrap();
-        incoming_tx.send(message2).await.unwrap();
-        incoming_tx.send(message3).await.unwrap();
-
-        tokio::spawn(async move {
-            processor.run().await;
-        });
-
-        let result = outgoing_rx.recv().await;
-        
-        assert!(result.is_some());
-        println!("test_handle_new_view passed");
-    }
-
-    #[tokio::test]
-    async fn test_handle_proposal() {
-        println!("Running test_handle_proposal");
-        let proposer_key = Pubkey { key: [2u8; 32] };
-        let proposer_secret = Secretkey { key: [2u8; 64] };
-        let proposer_keypair = Keypair { pubkey: proposer_key.clone(), secret: proposer_secret };
-
-        let replica_key = Pubkey { key: [1u8; 32] };
-        let replica_secret = Secretkey { key: [2u8; 64] };
-        let replica_keypair = Keypair { pubkey: replica_key.clone(), secret: replica_secret };
-
-        let peers = Peers::new(vec![proposer_key, replica_key]);
-
-        let last_block = Block {
-            view_num: 0,
-            parent: [0u8; 64],
-            data: [1u8; 1024],
-        };
-
-        let block = Block {
-            view_num: 0,
-            parent: last_block.hash(),
-            data: [0u8; 1024],
-        };
-
-        let proposal = Proposal {
-            view_num: 0,
-            stage: Stage::Prepare,
-            block: block.clone(),
-            qc: QuorumCertificate::genesis(),
-            sig: proposer_keypair.sign(&block.hash()),
-        };
-
-        let message = Message::Proposal(proposal);
-
-        let (incoming_tx, incoming_rx) = tokio::sync::mpsc::channel(100);
-        let (outgoing_tx, mut outgoing_rx) = tokio::sync::mpsc::channel(100);
-
-        let mut processor = ConsensusProcessor {
-            keypair: replica_keypair,
-            stage: Stage::Prepare,
-            role: ConsensusRole::Replica,
-            state: ConsensusState {
-                current_view: 0,
-                high_qc: QuorumCertificate::genesis(),
-                next_qc: QuorumCertificate::genesis(),
-                vote_count: 0,
-                peers,
-            },
-            msg_rx: incoming_rx,
-            msg_tx: outgoing_tx,
-        };
-
-        incoming_tx.send(message).await.unwrap();
-
-        tokio::spawn(async move {
-            processor.run().await;
-        });
-
-        let result = outgoing_rx.recv().await;
-        
-        assert!(result.is_some());
-        println!("test_handle_proposal passed");
-    }
-
-    #[tokio::test]
-    async fn test_handle_vote() {
-        let proposer_key = Pubkey { key: [1u8; 32] };
-        let proposer_secret = Secretkey { key: [2u8; 64] };
-        let proposer_keypair = Keypair { pubkey: proposer_key.clone(), secret: proposer_secret };
-
-        let replica1_key = Pubkey { key: [2u8; 32] };
-        let replica1_secret = Secretkey { key: [2u8; 64] };
-        let replica1_keypair = Keypair { pubkey: replica1_key.clone(), secret: replica1_secret };
-
-        let replica2_key = Pubkey { key: [3u8; 32] };
-        let replica2_secret = Secretkey { key: [2u8; 64] };
-        let replica2_keypair = Keypair { pubkey: replica2_key.clone(), secret: replica2_secret };
-
-        let replica3_key = Pubkey { key: [4u8; 32] };
-        let replica3_secret = Secretkey { key: [2u8; 64] };
-        let replica3_keypair = Keypair { pubkey: replica3_key.clone(), secret: replica3_secret };
-        
-        let peers = Peers::new(vec![proposer_key, replica1_key, replica2_key, replica3_key]);
-
-        let vote1 = Vote {
-            view_num: 0,
-            stage: Stage::Prepare,
-            hash: [0u8; 64],
-            sig: replica1_keypair.sign(&[0u8; 64]),
-        };
-
-        let vote2 = Vote {
-            view_num: 0,
-            stage: Stage::Prepare,
-            hash: [0u8; 64],
-            sig: replica2_keypair.sign(&[0u8; 64]),
-        };
-
-        let vote3 = Vote {
-            view_num: 0,
-            stage: Stage::Prepare,
-            hash: [0u8; 64],
-            sig: replica3_keypair.sign(&[0u8; 64]),
-        };
-
-        let message1 = Message::Vote(vote1);
-        let message2 = Message::Vote(vote2);
-        let message3 = Message::Vote(vote3);
-
-        let (incoming_tx, incoming_rx) = tokio::sync::mpsc::channel(100);
-        let (outgoing_tx, mut outgoing_rx) = tokio::sync::mpsc::channel(100);
-
-        let mut processor = ConsensusProcessor {
-            keypair: proposer_keypair,
-            stage: Stage::Prepare,
-            role: ConsensusRole::Leader,
-            state: ConsensusState {
-                current_view: 0,
-                high_qc: QuorumCertificate::genesis(),
-                next_qc: QuorumCertificate::genesis(),
-                vote_count: 0,
-                peers,
-            },
-            msg_rx: incoming_rx,
-            msg_tx: outgoing_tx,
-        };
-
-        incoming_tx.send(message1).await.unwrap();
-        incoming_tx.send(message2).await.unwrap();
-        incoming_tx.send(message3).await.unwrap();
-
-        tokio::spawn(async move {
-            processor.run().await;
-        });
-
-        let result = outgoing_rx.recv().await;
-        
-        assert!(result.is_some());
-        println!("test_handle_vote passed");
-    }
+    use crate::{common::crypto::Keypair, consensus::{message::Block, qc::ConsensusPayload}};
 
     #[tokio::test]
     async fn test_end_to_end() {
-        println!("Running test_end_to_end");
-        let proposer_key = Pubkey { key: [1u8; 32] };
-        let proposer_secret = Secretkey { key: [2u8; 64] };
-        let proposer_keypair = Keypair { pubkey: proposer_key.clone(), secret: proposer_secret };
+        // Arrange: Create channels for proposer and replicas
+        let (proposor_incoming_tx, proposor_incoming_rx) = tokio::sync::mpsc::channel(100);
+        let (proposor_outgoing_tx, mut proposor_outgoing_rx) = tokio::sync::mpsc::channel(100);
 
-        let replica1_key = Pubkey { key: [2u8; 32] };
-        let replica1_secret = Secretkey { key: [2u8; 64] };
-        let replica1_keypair = Keypair { pubkey: replica1_key.clone(), secret: replica1_secret };
+        let (replica1_incoming_tx, replica1_incoming_rx) = tokio::sync::mpsc::channel(100);
+        let (replica1_outgoing_tx, mut replica1_outgoing_rx) = tokio::sync::mpsc::channel(100);
 
-        let replica2_key = Pubkey { key: [3u8; 32] };
-        let replica2_secret = Secretkey { key: [2u8; 64] };
-        let replica2_keypair = Keypair { pubkey: replica2_key.clone(), secret: replica2_secret };
+        let (replica2_incoming_tx, replica2_incoming_rx) = tokio::sync::mpsc::channel(100);
+        let (replica2_outgoing_tx, mut replica2_outgoing_rx) = tokio::sync::mpsc::channel(100);
 
-        let replica3_key = Pubkey { key: [4u8; 32] };
-        let replica3_secret = Secretkey { key: [2u8; 64] };
-        let replica3_keypair = Keypair { pubkey: replica3_key.clone(), secret: replica3_secret };
+        let (replica3_incoming_tx, replica3_incoming_rx) = tokio::sync::mpsc::channel(100);
+        let (replica3_outgoing_tx, mut replica3_outgoing_rx) = tokio::sync::mpsc::channel(100);
 
-        let peers = Peers::new(vec![replica1_key, proposer_key, replica2_key, replica3_key]);
+        let replica_senders = vec![replica1_incoming_tx, replica2_incoming_tx, replica3_incoming_tx];
 
+        // Arrange: Create keypairs for proposer and replicas
+        let proposer = Keypair::new_pair();
+        let replica1 = Keypair::new_pair();
+        let replica2 = Keypair::new_pair();
+        let replica3 = Keypair::new_pair();
+        let peers = Peers::new(vec![replica1.pubkey(), proposer.pubkey(), replica2.pubkey(), replica3.pubkey()]);
+
+        // Arrange: Create a genesis block and a genesis QC
         let last_block = Block::genesis();
-
         let last_qc = QuorumCertificate::genesis();
 
         let new_block = Block {
@@ -559,33 +295,32 @@ mod tests {
             signatures: Vec::new(),
         };
 
+        // Arrange: Create new view message for each replica
         let new_view1 = NewView {
             view_num: 1,
             qc: last_qc.clone(),
-            sig: replica1_keypair.sign(&last_block.hash()),
+            sig: replica1.sign(&last_block.hash()),
         };
 
         let new_view2 = NewView {
             view_num: 1,
             qc: last_qc.clone(),
-            sig: replica2_keypair.sign(&last_block.hash()),
+            sig: replica2.sign(&last_block.hash()),
         };
 
         let new_view3 = NewView {
             view_num: 1,
             qc: last_qc.clone(),
-            sig: replica3_keypair.sign(&last_block.hash()),
+            sig: replica3.sign(&last_block.hash()),
         };
 
         let message1 = Message::NewView(new_view1);
         let message2 = Message::NewView(new_view2);
         let message3 = Message::NewView(new_view3);
 
-        let (proposor_incoming_tx, proposor_incoming_rx) = tokio::sync::mpsc::channel(100);
-        let (proposor_outgoing_tx, mut proposor_outgoing_rx) = tokio::sync::mpsc::channel(100);
-
+        // Arrange: Instantiate processers for proposer and replicas
         let mut proposer_processor = ConsensusProcessor {
-            keypair: proposer_keypair,
+            keypair: proposer,
             stage: Stage::Prepare,
             role: ConsensusRole::Leader,
             state: ConsensusState {
@@ -599,11 +334,8 @@ mod tests {
             msg_tx: proposor_outgoing_tx,
         };
 
-        let (replica1_incoming_tx, replica1_incoming_rx) = tokio::sync::mpsc::channel(100);
-        let (replica1_outgoing_tx, mut replica1_outgoing_rx) = tokio::sync::mpsc::channel(100);
-
         let mut replica1_processor = ConsensusProcessor {
-            keypair: replica1_keypair,
+            keypair: replica1,
             stage: Stage::Prepare,
             role: ConsensusRole::Replica,
             state: ConsensusState {
@@ -617,11 +349,8 @@ mod tests {
             msg_tx: replica1_outgoing_tx,
         };
 
-        let (replica2_incoming_tx, replica2_incoming_rx) = tokio::sync::mpsc::channel(100);
-        let (replica2_outgoing_tx, mut replica2_outgoing_rx) = tokio::sync::mpsc::channel(100);
-
         let mut replica2_processor = ConsensusProcessor {
-            keypair: replica2_keypair,
+            keypair: replica2,
             stage: Stage::Prepare,
             role: ConsensusRole::Replica,
             state: ConsensusState {
@@ -635,11 +364,8 @@ mod tests {
             msg_tx: replica2_outgoing_tx,
         };
 
-        let (replica3_incoming_tx, replica3_incoming_rx) = tokio::sync::mpsc::channel(100);
-        let (replica3_outgoing_tx, mut replica3_outgoing_rx) = tokio::sync::mpsc::channel(100);
-
         let mut replica3_processor = ConsensusProcessor {
-            keypair: replica3_keypair,
+            keypair: replica3,
             stage: Stage::Prepare,
             role: ConsensusRole::Replica,
             state: ConsensusState {
@@ -669,17 +395,23 @@ mod tests {
             replica3_processor.run().await;
         });
 
-        let replica_senders = vec![replica1_incoming_tx, replica2_incoming_tx, replica3_incoming_tx];
+        // ------------------------------------
+        // 1. PREPARE PHASE
+        // ------------------------------------
 
-        // Collect New View
+        // Act: Send new view messages to proposer
         proposor_incoming_tx.send(message1).await.unwrap();
         proposor_incoming_tx.send(message2).await.unwrap();
         proposor_incoming_tx.send(message3).await.unwrap();
 
-        // Prepare Phase
+        // Act: Processor handles new view messages and sends proposal messages
         let prepare_msg = proposor_outgoing_rx.recv().await.unwrap();
+
+        // Act: Proposal messages broadcasted to replicas
+        // This currently uses a helper function, will be replaced by a sender struct bound to the node
         broadcast(prepare_msg, replica_senders.clone()).await;
 
+        // Act: Replicas receive proposal messages and send votes
         let vote_msg1 = replica1_outgoing_rx.recv().await.unwrap();
         let vote_msg2 = replica2_outgoing_rx.recv().await.unwrap();
         let vote_msg3 = replica3_outgoing_rx.recv().await.unwrap();
@@ -688,10 +420,17 @@ mod tests {
         proposor_incoming_tx.send(vote_msg2).await.unwrap();
         proposor_incoming_tx.send(vote_msg3).await.unwrap();
 
-        // PreCommit Phase
+        // ------------------------------------
+        // 2. PRE-COMMIT PHASE
+        // ------------------------------------
+
+        // Act: Proposer receives votes and sends pre-commit messages
         let pre_commit_msg = proposor_outgoing_rx.recv().await.unwrap();
+
+        // Act: Pre-commit messages broadcasted to replicas
         broadcast(pre_commit_msg, replica_senders.clone()).await;
 
+        // Act: Replicas receive pre-commit messages and send votes
         let vote_msg1 = replica1_outgoing_rx.recv().await.unwrap();
         let vote_msg2 = replica2_outgoing_rx.recv().await.unwrap();
         let vote_msg3 = replica3_outgoing_rx.recv().await.unwrap();
@@ -700,9 +439,31 @@ mod tests {
         proposor_incoming_tx.send(vote_msg2).await.unwrap();
         proposor_incoming_tx.send(vote_msg3).await.unwrap();
 
-        // Commit Phase
+        // ------------------------------------
+        // 3. COMMIT PHASE
+        // ------------------------------------
+
+        // Act: Proposer receives votes and sends commit messages
         let commit_msg = proposor_outgoing_rx.recv().await.unwrap();
+
+        // Act: Commit messages broadcasted to replicas
         broadcast(commit_msg, replica_senders.clone()).await;
+
+        // Act: Replicas receive commit messages and send votes
+        let vote_msg1 = replica1_outgoing_rx.recv().await.unwrap();
+        let vote_msg2 = replica2_outgoing_rx.recv().await.unwrap();
+        let vote_msg3 = replica3_outgoing_rx.recv().await.unwrap();
+
+        proposor_incoming_tx.send(vote_msg1).await.unwrap();
+        proposor_incoming_tx.send(vote_msg2).await.unwrap();
+        proposor_incoming_tx.send(vote_msg3).await.unwrap();
+
+        // ------------------------------------
+        // 4. DECIDE PHASE
+        // ------------------------------------
+
+        // Act: Proposer receives votes and sends decide messages
+        proposor_outgoing_rx.recv().await.unwrap();
 
     }
 
