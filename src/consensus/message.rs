@@ -20,6 +20,25 @@ pub const MAX_BLOCK_SIZE: usize = 1024;
 
 pub type BlockData = [u8; MAX_BLOCK_SIZE];
 
+pub trait BlockDataExt {
+    fn new(data: u64) -> BlockData;
+}
+
+impl BlockDataExt for BlockData {
+    // Simplified version of the BlockData creation
+    fn new(data: u64) -> BlockData {
+        let mut block_data = [0u8; MAX_BLOCK_SIZE];
+        let data_bytes = data.to_be_bytes();
+        let data_len = data_bytes.len();
+        if data_len > MAX_BLOCK_SIZE {
+            panic!("Data size exceeds maximum block size");
+        }
+        block_data[..data_len].copy_from_slice(&data_bytes);
+        block_data[data_len..].fill(0);
+        block_data
+    }
+}
+
 pub trait Hashable {
     fn hash(&self) -> Digest;
 }

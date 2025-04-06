@@ -96,8 +96,6 @@ impl QuorumCertificate {
             println!("QC failed: Not enough valid signatures");
             return false;
         }
-
-        println!("QC validation passed");
         
         true
     }
