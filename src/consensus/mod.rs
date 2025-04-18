@@ -43,17 +43,23 @@ mod tests {
         let replica3 = Keypair::new_pair();
         let peers = Peers::new(vec![replica1.pubkey(), replica2.pubkey(), proposer.pubkey(), replica3.pubkey()]);
 
-        // Arrange: Create a genesis block and a genesis QC
+        // Arrange: Create blocks
+        let last_block = Block {
+            view_num: last_view,
+            parent: Block::genesis().hash(),
+            data: BlockData::new(1),
+        };
+
         let block = Block {
             view_num: current_view,
-            parent: Block::genesis().hash(),
-            data: BlockData::new(0),
+            parent: last_block.hash(),
+            data: BlockData::new(2),
         };
 
         let last_qc_payload = ConsensusPayload {
             view_num: last_view,
             stage: Stage::Decide,
-            block: block.clone(),
+            block: last_block.clone(),
         };
 
         let last_qc = QuorumCertificate{
@@ -69,19 +75,19 @@ mod tests {
         let new_view1 = NewView {
             view_num: current_view,
             qc: last_qc.clone(),
-            sig: replica1.sign(&block.hash()),
+            sig: replica1.sign(&last_qc_payload.hash()),
         };
 
         let new_view2 = NewView {
             view_num: current_view,
             qc: last_qc.clone(),
-            sig: replica2.sign(&block.hash()),
+            sig: replica2.sign(&last_qc_payload.hash()),
         };
 
         let new_view3 = NewView {
             view_num: current_view,
             qc: last_qc.clone(),
-            sig: replica3.sign(&block.hash()),
+            sig: replica3.sign(&last_qc_payload.hash()),
         };
 
         let message1 = Message::NewView(new_view1);
@@ -104,6 +110,7 @@ mod tests {
             store: Store::new(),
             msg_rx: proposor_incoming_rx,
             msg_tx: proposor_outgoing_tx,
+            next_block: Some(block.clone()),
         };
 
         let mut replica1_processor = ConsensusProcessor {
@@ -121,6 +128,7 @@ mod tests {
             store: Store::new(),
             msg_rx: replica1_incoming_rx,
             msg_tx: replica1_outgoing_tx,
+            next_block: None,
         };
 
         let mut replica2_processor = ConsensusProcessor {
@@ -138,6 +146,7 @@ mod tests {
             store: Store::new(),
             msg_rx: replica2_incoming_rx,
             msg_tx: replica2_outgoing_tx,
+            next_block: None,
         };
 
         let mut replica3_processor = ConsensusProcessor {
@@ -155,6 +164,7 @@ mod tests {
             store: Store::new(),
             msg_rx: replica3_incoming_rx,
             msg_tx: replica3_outgoing_tx,
+            next_block: None,
         };
 
         println!("Node {}: Starting processors", proposer_processor.id);

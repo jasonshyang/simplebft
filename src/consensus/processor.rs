@@ -18,6 +18,7 @@ pub struct ConsensusProcessor {
     pub store: Store,
     pub msg_rx: Receiver<Message>,
     pub msg_tx: Sender<Message>,
+    pub next_block: Option<Block>, // FIXME
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -98,21 +99,27 @@ impl ConsensusProcessor {
             // Start Prepare stage
             self.stage = Stage::Prepare;
 
+            let next_block = self.next_block.clone().unwrap_or_else(|| self.new_block()); // FIXME
+
             // Send Prepare Proposal
             self.msg_tx.send(Message::Proposal(Proposal {
                 view_num: self.state.current_view,
                 stage: Stage::Prepare,
-                block: self.state.high_qc.payload.block.clone(),
+                block: next_block.clone(),
                 qc: self.state.high_qc.clone(),
                 sig: self.keypair.sign(&self.state.high_qc.payload.hash()),
             })).await.unwrap();
-            println!("Node {}: Broadcasted new Proposal, stage: {:?}", self.id, self.stage);
+            println!("Node {}: New Round, sent Prepare Proposal", self.id);
 
             // Reset vote count
             self.reset_vote_count();
 
             // Update next QC
-            self.reset_next_qc(new_view.qc.payload.clone());
+            self.reset_next_qc(ConsensusPayload {
+                view_num: self.state.current_view,
+                stage: Stage::Prepare,
+                block: next_block.clone(),
+            });
         }
     }
 
@@ -229,16 +236,22 @@ impl ConsensusProcessor {
             return false;
         }
 
-        // Liveness rule - The liveness rule is the replica will accept m if m.justify has a higher view than the current lockedQC
-        if proposal.qc.payload.view_num > self.state.high_qc.payload.view_num {
-            println!("Node {}: Liveness rule failed", self.id);
-            return false;
-        }
+        // FIXME
+        match proposal.stage {
+            Stage::Decide => {}
+            _ => {
+                // Liveness rule - The liveness rule is the replica will accept m if m.justify has a higher view than the current lockedQC
+                let liveness = proposal.qc.payload.view_num > self.state.high_qc.payload.view_num;
 
-        // Safety rule - The safety rule to accept a proposal is the branch of m.node extends from the currently locked node lockedQC .node
-        if proposal.qc.payload.block.parent == self.state.high_qc.payload.block.hash() {
-            println!("Node {}: Safety rule failed", self.id);
-            return false;
+                // Safety rule - The safety rule to accept a proposal is the branch of m.node extends from the currently locked node lockedQC .node
+                let safety = proposal.block.parent == self.state.high_qc.payload.block.hash();
+
+                // The predicate is true as long as either one of two rules holds.
+                if liveness == false && safety == false {
+                    println!("Node {}: Proposal does not satisfy liveness or safety rule", self.id);
+                    return false;
+                }
+            }
         }
 
         true
@@ -273,7 +286,20 @@ impl ConsensusProcessor {
     }
 
     async fn vote(&self, proposal: &Proposal) {
-        let hash = proposal.qc.payload.hash();
+        // FIXME
+        let hash = match self.stage {
+            Stage::Prepare => {
+                ConsensusPayload {
+                    view_num: proposal.view_num,
+                    stage: Stage::Prepare,
+                    block: proposal.block.clone(),
+                }.hash()
+            }
+            _ => {
+                proposal.qc.payload.hash()
+            }
+        };
+        
         let sig = self.keypair.sign(&hash);
         let vote = Vote {
             view_num: self.state.current_view,
@@ -349,6 +375,7 @@ impl ConsensusProcessor {
         self.state.vote_count >= (self.state.peers.members.len() - self.state.peers.members.len() / 3).try_into().unwrap()
     }
 
+    // FIXME: not very clear
     fn reset_next_qc(&mut self, payload: ConsensusPayload) {
         if let Some(next_qc) = &mut self.state.next_qc {
             next_qc.reset(payload)
